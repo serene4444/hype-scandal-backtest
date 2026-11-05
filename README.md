@@ -45,6 +45,26 @@ Most student backtesters report a big return and stop there. That number is usua
 - Headline sentiment as a trading signal
 - A plain-English rule builder ("buy Palantir after a 7% weekly drop")
 
+## Wireframes
+
+Early wireframes of the four main screens. All numbers are placeholders like `[$ X]` until real results exist, and chart lines are sketches, not data.
+
+**1. Run a backtest:** pick a stock, a strategy, the drop threshold, a start date, and the starting amount.
+
+![Run a backtest screen](docs/wireframes/01-run-a-backtest.png)
+
+**2. Results:** scorecard, portfolio value vs. buy-and-hold with buy, sell, and event markers, Claude's analysis, and the trade log.
+
+![Results screen](docs/wireframes/02-results.png)
+
+**3. Strategy tournament:** leaderboard with "beat the monkeys?" scores, the race chart, and where your strategy lands among 1,000 random monkeys.
+
+![Strategy tournament screen](docs/wireframes/03-strategy-tournament.png)
+
+**4. ML model:** today's prediction, the live tracker, the features behind the call, and how walk-forward testing works.
+
+![ML model screen](docs/wireframes/04-ml-model.png)
+
 ## The ML rule
 
 A model predicts whether tomorrow's price will go up or down, using only information available up to today:
