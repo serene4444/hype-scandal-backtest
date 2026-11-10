@@ -1,6 +1,8 @@
 // Shared fetch wrapper for the FastAPI backend.
 
-const API_BASE = import.meta.env.VITE_API_URL ?? '/api'
+// A blank VITE_API_URL counts as unset (a CI variable that is missing arrives as ""), and a
+// trailing slash is dropped so paths join cleanly.
+const API_BASE = (import.meta.env.VITE_API_URL || '/api').replace(/\/+$/, '')
 
 export class ApiError extends Error {
   readonly status: number

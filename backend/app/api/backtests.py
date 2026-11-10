@@ -15,11 +15,12 @@ from datetime import date
 from typing import Any, Callable, Literal
 
 import pandas as pd
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.exc import IntegrityError
 
 from app import store
+from app.api.rate_limit import enforce_backtest_limit, env_int
 from app.core.backtester import Backtester
 from app.core.metrics import compute_metrics
 from app.core.models import BacktestResult
@@ -30,6 +31,8 @@ from app.core.strategies import STRATEGIES
 MIN_AMOUNT = 100.0
 MAX_AMOUNT = 1_000_000.0
 MIN_TRADING_DAYS = 20
+DEFAULT_MAX_SAVED_BACKTESTS = 5000
+"""Storage cap: at ~25-50 KB each, 5,000 runs stay well inside Supabase's free 500 MB. Oldest go first."""
 UNPROCESSABLE = 422
 
 router = APIRouter(prefix="/backtests", tags=["backtests"])
@@ -154,8 +157,14 @@ def _summary(result_id: str, run: StoredRun | None = None, cached: bool = False)
     )
 
 
-def execute_backtest(request: BacktestRequest, load: PriceLoader) -> BacktestSummary:
-    """Run (or reuse) a backtest. Shared by the HTTP route and the rule-builder agent."""
+def execute_backtest(
+    request: BacktestRequest, load: PriceLoader, before_new_run: Callable[[], None] | None = None
+) -> BacktestSummary:
+    """Run (or reuse) a backtest. Shared by the HTTP route and the rule-builder agent.
+
+    ``before_new_run`` is called only when a new run is about to be saved (not for a reused
+    one), so the route can apply its rate limit there.
+    """
     try:
         strategy = STRATEGIES[request.strategy](**request.params)
     except (TypeError, ValueError) as exc:
@@ -173,6 +182,8 @@ def execute_backtest(request: BacktestRequest, load: PriceLoader) -> BacktestSum
     if existing:
         return _summary(existing, cached=True)
 
+    if before_new_run is not None:
+        before_new_run()
     result = Backtester(fee=request.fee).run(strategy, prices, request.amount, ticker=request.ticker)
     result_id = uuid.uuid4().hex
     try:
@@ -183,6 +194,7 @@ def execute_backtest(request: BacktestRequest, load: PriceLoader) -> BacktestSum
         if existing is None:
             raise
         return _summary(existing, cached=True)
+    store.prune_backtests(keep=env_int("MAX_SAVED_BACKTESTS", DEFAULT_MAX_SAVED_BACKTESTS))
     return _summary(result_id, StoredRun(request, result))
 
 
@@ -210,8 +222,10 @@ def monkey_comparison(result_id: str, load: PriceLoader, n_monkeys: int = DEFAUL
 
 
 @router.post("", response_model=BacktestSummary, status_code=status.HTTP_201_CREATED)
-def run_backtest(request: BacktestRequest, load: PriceLoader = Depends(get_price_loader)) -> BacktestSummary:
-    return execute_backtest(request, load)
+def run_backtest(
+    request: BacktestRequest, http_request: Request, load: PriceLoader = Depends(get_price_loader)
+) -> BacktestSummary:
+    return execute_backtest(request, load, before_new_run=lambda: enforce_backtest_limit(http_request))
 
 
 @router.get("/{result_id}/monkeys", response_model=MonkeyOut)

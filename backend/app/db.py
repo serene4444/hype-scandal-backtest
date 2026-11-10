@@ -58,6 +58,17 @@ agent_calls = Table(
     Column("created_at", DateTime, nullable=False, index=True),  # UTC
 )
 
+backtest_saves = Table(
+    "backtest_saves",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("client", String(64), nullable=False, index=True),  # hashed, never the raw IP
+    Column("created_at", DateTime, nullable=False, index=True),  # UTC
+)
+
+CONNECT_TIMEOUT_SECONDS = 10
+"""Give up on a database that does not answer, so visitors get an error instead of a hung page."""
+
 
 def database_url() -> str:
     url = os.environ.get("DATABASE_URL", "").strip()
@@ -77,8 +88,16 @@ def make_engine(url: str) -> Engine:
             return create_engine(url, connect_args={"check_same_thread": False}, poolclass=StaticPool)
         LOCAL_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
         return create_engine(url, connect_args={"check_same_thread": False})
-    # Supabase's connection pooler runs in transaction mode, which cannot use prepared statements.
-    return create_engine(url, pool_pre_ping=True, connect_args={"prepare_threshold": None})
+    return create_engine(
+        url,
+        pool_pre_ping=True,
+        # Supabase's free plan allows few connections at once; one small pool per server is plenty.
+        pool_size=3,
+        max_overflow=2,
+        pool_timeout=CONNECT_TIMEOUT_SECONDS,
+        # prepare_threshold: Supabase's transaction pooler (port 6543) cannot use prepared statements.
+        connect_args={"prepare_threshold": None, "connect_timeout": CONNECT_TIMEOUT_SECONDS},
+    )
 
 
 _engine: Engine | None = None
@@ -96,4 +115,18 @@ def set_engine(engine: Engine) -> None:
     """Use ``engine`` from now on (tests swap in an in-memory database) and make sure the tables exist."""
     global _engine
     metadata.create_all(engine)
+    if engine.dialect.name == "postgresql":
+        lock_down_tables(engine)
     _engine = engine
+
+
+def lock_down_tables(engine: Engine) -> None:
+    """Turn on Row Level Security for every app table.
+
+    Supabase serves tables in the public schema through its own web API. With RLS on and no
+    policies, that API can read and write nothing, while this backend (which owns the tables)
+    keeps full access. Safe to run repeatedly.
+    """
+    with engine.begin() as conn:
+        for table in metadata.sorted_tables:
+            conn.exec_driver_sql(f'ALTER TABLE public."{table.name}" ENABLE ROW LEVEL SECURITY')

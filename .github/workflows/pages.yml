@@ -30,6 +30,18 @@ jobs:
           node-version: "22"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
+      - name: Check the backend address is set
+        env:
+          VITE_API_URL: ${{ vars.VITE_API_URL }}
+        run: |
+          if [ -z "$VITE_API_URL" ]; then
+            echo "::error::Repository variable VITE_API_URL is not set (Settings > Secrets and variables > Actions > Variables). Without it the published site cannot reach the backend."
+            exit 1
+          fi
+          case "$VITE_API_URL" in
+            https://*) echo "Backend: $VITE_API_URL" ;;
+            *) echo "::error::VITE_API_URL must start with https:// (got: $VITE_API_URL)"; exit 1 ;;
+          esac
       - run: npm ci
       - name: Build
         run: npm run build

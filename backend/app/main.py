@@ -1,7 +1,11 @@
+import logging
 import os
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 
 from app.settings import load_env
 
@@ -26,6 +30,21 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["Content-Type"],
 )
+
+logger = logging.getLogger(__name__)
+
+
+@app.exception_handler(OperationalError)
+@app.exception_handler(PoolTimeoutError)
+async def database_unavailable(_: Request, exc: Exception) -> JSONResponse:
+    """Database unreachable, timed out or out of connections: say so instead of a bare 500."""
+    logger.error("Database unavailable: %s", exc)
+    return JSONResponse(
+        status_code=503,
+        content={"detail": "The database isn’t responding right now. Please try again in a minute."},
+        headers={"Retry-After": "60"},
+    )
+
 
 app.include_router(backtests.router)
 app.include_router(agent.router)

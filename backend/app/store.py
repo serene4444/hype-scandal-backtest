@@ -9,7 +9,7 @@ import pandas as pd
 from sqlalchemy import delete, func, insert, select
 
 from app.core.models import BacktestResult, Metrics, Trade
-from app.db import agent_calls, backtests, get_engine, prices
+from app.db import agent_calls, backtest_saves, backtests, get_engine, prices
 
 
 class PricesUnavailable(Exception):
@@ -97,12 +97,27 @@ def load_backtest(result_id: str) -> tuple[dict[str, Any], BacktestResult] | Non
     return None if row is None else (row.request, _result_from_json(row.result))
 
 
+def prune_backtests(keep: int) -> int:
+    """Delete the oldest saved backtests so at most ``keep`` remain; returns how many were deleted."""
+    with get_engine().begin() as conn:
+        total = conn.execute(select(func.count()).select_from(backtests)).scalar() or 0
+        extra = total - keep
+        if extra <= 0:
+            return 0
+        oldest = select(backtests.c.id).order_by(backtests.c.created_at, backtests.c.id).limit(extra)
+        conn.execute(delete(backtests).where(backtests.c.id.in_(oldest.scalar_subquery())))
+    return extra
+
+
 def clear_backtests() -> None:
     with get_engine().begin() as conn:
         conn.execute(delete(backtests))
 
 
-# ---------- Claude rate limit ----------
+# ---------- Rate limits ----------
+
+EVENT_TABLES = {"agent": agent_calls, "backtest": backtest_saves}
+"""What each limit counts: Claude rule-builder runs, and new backtests saved."""
 
 
 def utc_now() -> datetime:
@@ -110,16 +125,26 @@ def utc_now() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
-def record_agent_call(client: str, when: datetime) -> None:
+def record_event(kind: str, client: str, when: datetime) -> None:
+    table = EVENT_TABLES[kind]
     with get_engine().begin() as conn:
-        conn.execute(insert(agent_calls).values(client=client, created_at=when))
+        conn.execute(insert(table).values(client=client, created_at=when))
 
 
-def agent_calls_since(since: datetime, client: str | None = None) -> tuple[int, datetime | None]:
-    """How many calls since ``since`` (for one client, or everyone), and the oldest of them."""
-    query = select(func.count(), func.min(agent_calls.c.created_at)).where(agent_calls.c.created_at >= since)
+def events_since(kind: str, since: datetime, client: str | None = None) -> tuple[int, datetime | None]:
+    """How many events since ``since`` (for one client, or everyone), and the oldest of them."""
+    table = EVENT_TABLES[kind]
+    query = select(func.count(), func.min(table.c.created_at)).where(table.c.created_at >= since)
     if client is not None:
-        query = query.where(agent_calls.c.client == client)
+        query = query.where(table.c.client == client)
     with get_engine().connect() as conn:
         count, oldest = conn.execute(query).one()
     return int(count), oldest
+
+
+def record_agent_call(client: str, when: datetime) -> None:
+    record_event("agent", client, when)
+
+
+def agent_calls_since(since: datetime, client: str | None = None) -> tuple[int, datetime | None]:
+    return events_since("agent", since, client)
