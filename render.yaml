@@ -1,0 +1,27 @@
+# Render Blueprint for the FastAPI backend (Render dashboard > New > Blueprint > pick this repo).
+# Secrets are marked sync: false, so Render asks for them during setup instead of reading them from git.
+services:
+  - type: web
+    name: hype-scandal-api
+    runtime: python
+    plan: free
+    rootDir: backend
+    buildCommand: pip install .
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.10
+      - key: DATABASE_URL # Supabase > Connect > Direct > Session pooler (port 5432), with your password filled in
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: ALLOWED_ORIGINS # your Vercel address, e.g. https://hype-scandal.vercel.app (comma-separate several)
+        sync: false
+      - key: CLIENT_IP_HEADER
+        value: x-forwarded-for
+      - key: AGENT_RULES_PER_HOUR
+        value: "5"
+      - key: AGENT_RULES_PER_DAY
+        value: "100"

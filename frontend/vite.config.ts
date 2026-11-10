@@ -3,6 +3,7 @@ import { defineConfig } from 'vite'
 
 // https://vite.dev/config/
 export default defineConfig({
+  base: process.env.GITHUB_PAGES ? '/hype-scandal-backtest/' : '/',
   plugins: [react()],
   server: {
     // In dev, /api/* goes to the FastAPI backend (uvicorn on port 8000), so no CORS setup is needed.
@@ -16,3 +17,7 @@ export default defineConfig({
     },
   },
 })
+
+
+
+

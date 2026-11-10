@@ -1,5 +1,5 @@
 import type { AnchorHTMLAttributes, MouseEvent } from 'react'
-import { navigate } from '../router'
+import { navigate, withBase } from '../router'
 
 type Props = AnchorHTMLAttributes<HTMLAnchorElement> & { to: string }
 
@@ -13,5 +13,5 @@ export function Link({ to, onClick, ...rest }: Props) {
     event.preventDefault()
     navigate(to)
   }
-  return <a href={to} onClick={handleClick} {...rest} />
+  return <a href={withBase(to)} onClick={handleClick} {...rest} />
 }

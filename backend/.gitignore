@@ -5,3 +5,4 @@ __pycache__/
 data/prices/*.csv
 .env
 data/*.db
+build/

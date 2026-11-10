@@ -155,6 +155,33 @@ In development the frontend sends `/api/*` requests to the backend on port 8000.
 
 Prices and saved backtests live in a database: Supabase Postgres when `DATABASE_URL` is set in `backend/.env`, otherwise a local SQLite file at `backend/data/app.db`. The plain-English rule builder is limited per visitor and per day; see `backend/.env.example` for the settings.
 
+## Deploy
+
+The backend runs on Render, the frontend on Vercel, and data in Supabase. Both hosts deploy from GitHub on every push to `main`.
+
+### 1. Backend on Render
+
+1. Render dashboard → **New** → **Blueprint** → pick this repository. It reads [`render.yaml`](render.yaml).
+2. Fill in the secrets it asks for:
+   - `DATABASE_URL`: Supabase → **Connect** → **Direct** → **Session pooler** (port 5432), with the password filled in.
+   - `ANTHROPIC_API_KEY`: your Claude API key.
+   - `ALLOWED_ORIGINS`: leave as a placeholder for now; set it in step 3.
+3. Deploy, then open `https://<your-service>.onrender.com/health`. It should say `{"status":"ok"}`.
+
+### 2. Frontend on Vercel
+
+1. Vercel → **Add New** → **Project** → import this repository.
+2. Set **Root Directory** to `frontend` (Vercel detects Vite).
+3. Add the environment variable `VITE_API_URL` = `https://<your-service>.onrender.com` (no trailing slash).
+4. Deploy and note the site address, e.g. `https://hype-scandal.vercel.app`.
+
+### 3. Connect them
+
+1. In Render, set `ALLOWED_ORIGINS` to the Vercel address from step 2 and save. Render redeploys.
+2. Open the Vercel site and run a backtest.
+
+On Render's free plan the backend sleeps after 15 minutes without visitors, so the first request after a quiet spell takes about a minute.
+
 ## Results
 
 Results will be published here after v1 launches, including:
