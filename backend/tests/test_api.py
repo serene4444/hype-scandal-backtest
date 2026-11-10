@@ -81,3 +81,16 @@ def test_monkeys_endpoint(client):
 
 def test_monkeys_unknown_id(client):
     assert client.get("/backtests/nope/monkeys").status_code == 404
+
+
+def test_prices_weekly_includes_latest(client):
+    body = client.get("/prices/META", params={"start": "2023-01-02"}).json()
+    points = body["points"]
+    assert body["ticker"] == "META"
+    assert points[0]["date"] == "2023-01-02"
+    assert len(points) == 61  # 300 days, every 5th, plus the last day
+    assert points[-1]["date"] == "2024-02-23"
+
+
+def test_prices_rejects_unknown_ticker(client):
+    assert client.get("/prices/TSLA").status_code == 422

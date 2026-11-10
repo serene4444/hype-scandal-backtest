@@ -5,7 +5,7 @@ from app.settings import load_env
 
 load_env()  # before anything reads ANTHROPIC_API_KEY
 
-from app.api import agent, backtests  # noqa: E402
+from app.api import agent, backtests, prices  # noqa: E402
 
 app = FastAPI(title="Hype vs. Scandal API", version="0.1.0")
 
@@ -18,6 +18,7 @@ app.add_middleware(
 
 app.include_router(backtests.router)
 app.include_router(agent.router)
+app.include_router(prices.router)
 
 
 @app.get("/health")

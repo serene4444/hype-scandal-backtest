@@ -40,3 +40,12 @@ def test_load_filters_dates(tmp_path):
 def test_unknown_ticker():
     with pytest.raises(ValueError):
         PriceData("TSLA")
+
+
+def test_known_market_closure_is_not_a_gap():
+    import pandas as pd
+
+    from app.core.prices import validate_prices
+
+    days = pd.to_datetime(["2001-09-07", "2001-09-10", "2001-09-17", "2001-09-18"])
+    assert validate_prices(pd.DataFrame({"close": [100.0, 99.0, 93.0, 92.0]}, index=days)) == []

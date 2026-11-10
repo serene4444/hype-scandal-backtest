@@ -23,6 +23,8 @@ EARLIEST_DATES: dict[str, date] = {
 
 MAX_CALENDAR_GAP_DAYS = 5
 """Longer than any weekend plus market holiday, so a bigger gap means missing data."""
+KNOWN_CLOSURES: frozenset[pd.Timestamp] = frozenset({pd.Timestamp("2001-09-17")})
+"""First trading day after a real multi-day market closure (9/11), so its long gap is not missing data."""
 MAX_DAILY_MOVE = 0.75
 """A one-day move bigger than this is far more likely bad data than a real move."""
 
@@ -81,7 +83,7 @@ def validate_prices(frame: pd.DataFrame) -> list[str]:
 
     unique_index = frame.index[~frame.index.duplicated()].sort_values()
     gaps = pd.Series(unique_index[1:] - unique_index[:-1], index=unique_index[1:])
-    long_gaps = gaps[gaps > pd.Timedelta(days=MAX_CALENDAR_GAP_DAYS)]
+    long_gaps = gaps[(gaps > pd.Timedelta(days=MAX_CALENDAR_GAP_DAYS)) & ~gaps.index.isin(list(KNOWN_CLOSURES))]
     for when, gap in long_gaps.head(5).items():
         problems.append(f"Missing days: {gap.days}-day gap ending {when:%Y-%m-%d}")
 
