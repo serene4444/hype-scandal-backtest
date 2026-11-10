@@ -39,11 +39,22 @@ Most student backtesters report a big return and stop there. That number is usua
 - **S&P 500 (SPY) benchmark** and a Meta vs. Palantir toggle
 - **Claude-written explanations** of each result in plain English
 
+### AI rule builder (agent with tool-calling)
+Type a rule in plain English, like *"buy Palantir after a 7% weekly drop"*. A Claude agent (`POST /agent/rule`) maps it onto the backtester by calling the app's own tools:
+
+| Tool | What it does |
+| --- | --- |
+| `list_strategies` | Supported stocks, rule templates, and their parameters |
+| `run_backtest` | Runs the rule through the same engine as the UI (fees, whole shares, no look-ahead) |
+| `get_metrics` | Scorecard next to buy-and-hold on the same dates |
+| `compare_to_monkeys` | Share of 1,000 random traders with the same trade count that the rule beat |
+
+Claude then explains in plain English how it read the rule, whether it beat buy-and-hold, and whether it beat the monkeys. The response includes every tool call, so the reasoning is visible and the backtest opens on the normal results screen. If a rule can't be expressed (another stock, short selling, news signals), the agent says so instead of guessing.
+
 ### v3: Later ideas
 - Live prediction tracker that saves each day's prediction before the market opens and scores it the next day
 - Market-mood detection (calm, trending, volatile) with clustering
 - Headline sentiment as a trading signal
-- A plain-English rule builder ("buy Palantir after a 7% weekly drop")
 
 ## Wireframes
 
