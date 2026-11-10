@@ -1,8 +1,16 @@
 # Hype vs. Scandal: Stock Strategy Backtester
 
-**Would this trading rule have turned $1,000 into more than just holding the stock, or was it just luck?**
+**Test a trading rule on past stock prices and find out if it would have made money, and whether that was skill or luck.**
 
-Hype vs. Scandal is a full-stack backtesting app that tests trading strategies on two stocks with very different personalities: **Meta (META)**, the scandal comeback, and **Palantir (PLTR)**, the hype rocket. Every strategy starts with $1,000, buys whole shares, pays trading fees, and competes against buy-and-hold and **1,000 randomly trading "monkeys"** to separate real skill from luck.
+## The goal in one example
+
+Say your rule is *"buy Meta whenever it drops 10%, sell when it bounces back."* Hype vs. Scandal replays real Meta prices day by day, starting with $1,000, and follows your rule exactly. At the end it answers three questions:
+
+1. **Did you make more money than just buying the stock and holding it?** If not, the rule wasn't worth the effort.
+2. **Did you beat 1,000 random traders?** The app also simulates 1,000 "monkeys" who buy and sell at random, making the same number of trades as you. If most of them did as well as you, your result was probably luck.
+3. **What happened and why?** Claude explains the result in plain English.
+
+Testing a rule on past prices like this is called **backtesting**. The app works on two stocks with very different stories: **Meta (META)**, which recovered from scandals, and **Palantir (PLTR)**, which rode a wave of hype.
 
 ![Status](https://img.shields.io/badge/status-in%20development-orange)
 ![Python](https://img.shields.io/badge/Python-FastAPI-3776AB)
@@ -15,7 +23,7 @@ Hype vs. Scandal is a full-stack backtesting app that tests trading strategies o
 
 ## Why this project
 
-Most student backtesters report a big return and stop there. That number is usually wrong: it peeks at future prices, ignores fees, or gets lucky. This project is built around the questions a trading desk would actually ask:
+Most student backtesters show one big profit number and stop there. That number is usually too good to be true: the code accidentally uses prices from the future, skips trading fees, or the rule just got lucky. This project is built around the questions a real trading firm would ask:
 
 - Did the strategy beat **simply holding the stock**?
 - Did it beat **random trading** with the same number of trades?
