@@ -140,9 +140,10 @@ hype-scandal-backtest/
 # Backend (http://localhost:8000)
 cd backend
 python -m venv .venv && .venv/Scripts/activate   # macOS/Linux: source .venv/bin/activate
-pip install -e ".[dev]"
+pip install -e ".[dev,data]"
 cp .env.example .env                             # then add your ANTHROPIC_API_KEY
-uvicorn app.main:app --reload
+python -m app.jobs.download_prices               # fill the prices table (once, then daily)
+uvicorn app.main:app --reload --reload-dir app
 
 # Frontend (http://localhost:5173), in a second terminal
 cd frontend
@@ -150,7 +151,9 @@ npm install
 npm run dev
 ```
 
-In development the frontend sends `/api/*` requests to the backend on port 8000. In production, set `VITE_API_URL` to the deployed API's address. Backtests need price CSVs in `backend/data/prices/` (see the README there).
+In development the frontend sends `/api/*` requests to the backend on port 8000. In production, set `VITE_API_URL` to the deployed API's address.
+
+Prices and saved backtests live in a database: Supabase Postgres when `DATABASE_URL` is set in `backend/.env`, otherwise a local SQLite file at `backend/data/app.db`. The plain-English rule builder is limited per visitor and per day; see `backend/.env.example` for the settings.
 
 ## Results
 

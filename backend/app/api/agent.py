@@ -6,12 +6,13 @@ from functools import lru_cache
 from typing import Any
 
 import anthropic
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
 from app.agent.rule_builder import AgentError, RuleBuilderAgent
 from app.agent.tools import Toolbox
 from app.api.backtests import PriceLoader, get_price_loader
+from app.api.rate_limit import enforce_agent_limits
 
 router = APIRouter(prefix="/agent", tags=["agent"])
 
@@ -50,9 +51,12 @@ class RuleResponse(BaseModel):
 @router.post("/rule", response_model=RuleResponse)
 def build_rule(
     body: RuleRequest,
+    http_request: Request,
     client: Any = Depends(get_claude_client),
     load: PriceLoader = Depends(get_price_loader),
 ) -> RuleResponse:
+    # Checked here, after the prompt is validated, so a rejected request costs nobody a run.
+    enforce_agent_limits(http_request)
     agent = RuleBuilderAgent(client, Toolbox(load))
     try:
         result = agent.run(body.prompt)

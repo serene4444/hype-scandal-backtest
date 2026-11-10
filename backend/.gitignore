@@ -4,3 +4,4 @@ __pycache__/
 .pytest_cache/
 data/prices/*.csv
 .env
+data/*.db

@@ -5,10 +5,10 @@ from __future__ import annotations
 from datetime import date
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
-from app.api.backtests import PriceLoader, get_price_loader
+from app.api.backtests import PriceLoader, get_price_loader, load_prices
 from app.core.prices import EARLIEST_DATES
 
 router = APIRouter(prefix="/prices", tags=["prices"])
@@ -31,10 +31,7 @@ def get_prices(
     every: int = Query(5, ge=1, le=21, description="Keep every Nth trading day (5 = weekly)"),
     load: PriceLoader = Depends(get_price_loader),
 ) -> PriceSeries:
-    try:
-        closes = load(ticker, start or EARLIEST_DATES[ticker], None)
-    except FileNotFoundError as exc:
-        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Price data is not available yet") from exc
+    closes = load_prices(load, ticker, start or EARLIEST_DATES[ticker], None)
     positions = list(range(0, len(closes), every))
     if positions and positions[-1] != len(closes) - 1:
         positions.append(len(closes) - 1)  # always include the latest close

@@ -62,7 +62,7 @@ export function Results({ id }: { id: string }) {
         <div className="notice notice-error" role="alert">
           <WarningIcon />
           {load.missing
-            ? 'This backtest is no longer stored. Results are kept in memory, so they disappear when the server restarts.'
+            ? 'We couldn’t find this backtest. The link may be wrong, or the result may have been removed.'
             : load.message}
         </div>
         <Link to="/backtest" className="button button-secondary">

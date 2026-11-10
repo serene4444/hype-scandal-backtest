@@ -176,9 +176,9 @@ class Toolbox:
             "ticker": run.request.ticker,
             "strategy": run.request.strategy,
             "params": run.request.params,
-            "first_day": run.prices.index[0].date().isoformat(),
-            "last_day": run.prices.index[-1].date().isoformat(),
-            "trading_days": len(run.prices),
+            "first_day": run.result.equity_curve.index[0].date().isoformat(),
+            "last_day": run.result.equity_curve.index[-1].date().isoformat(),
+            "trading_days": len(run.result.equity_curve),
             "amount": run.request.amount,
             "fee": run.request.fee,
             "strategy_metrics": vars(strategy),
@@ -192,4 +192,4 @@ class Toolbox:
     def _compare_to_monkeys(self, backtest_id: str, n_monkeys: int = DEFAULT_MONKEYS) -> dict[str, Any]:
         if not 10 <= n_monkeys <= 5000:
             raise ValueError("n_monkeys must be between 10 and 5000")
-        return {"backtest_id": backtest_id, **monkey_comparison(backtest_id, n_monkeys).model_dump()}
+        return {"backtest_id": backtest_id, **monkey_comparison(backtest_id, self.load, n_monkeys).model_dump()}

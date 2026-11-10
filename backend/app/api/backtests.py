@@ -1,7 +1,8 @@
 """FR2/FR3 endpoints: run a backtest and fetch its result.
 
-Results are cached in memory, keyed by the exact settings, until the Supabase
-tables exist; the routes and response shapes are the ones the frontend will use.
+Results are saved in the database (Supabase in production), so result links keep
+working after a restart. A run is reused when the settings and the price data
+it would use are the same.
 """
 
 from __future__ import annotations
@@ -16,12 +17,14 @@ from typing import Any, Callable, Literal
 import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field, model_validator
+from sqlalchemy.exc import IntegrityError
 
+from app import store
 from app.core.backtester import Backtester
 from app.core.metrics import compute_metrics
 from app.core.models import BacktestResult
 from app.core.monkeys import DEFAULT_MONKEYS, compare_to_monkeys
-from app.core.prices import EARLIEST_DATES, PriceData
+from app.core.prices import EARLIEST_DATES
 from app.core.strategies import STRATEGIES
 
 MIN_AMOUNT = 100.0
@@ -34,15 +37,16 @@ router = APIRouter(prefix="/backtests", tags=["backtests"])
 PriceLoader = Callable[[str, date, date | None], pd.Series]
 
 
-def load_closes(ticker: str, start: date, end: date | None) -> pd.Series:
-    data = PriceData(ticker)
-    data.load(start, end)
-    return data.closes()
-
-
 def get_price_loader() -> PriceLoader:
-    """Dependency so tests (and later Supabase) can swap the price source."""
-    return load_closes
+    """Dependency so tests can swap the price source; the app reads the prices table."""
+    return store.load_closes
+
+
+def load_prices(load: PriceLoader, ticker: str, start: date, end: date | None) -> pd.Series:
+    try:
+        return load(ticker, start, end)
+    except (store.PricesUnavailable, FileNotFoundError) as exc:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Price data is not available yet") from exc
 
 
 class BacktestRequest(BaseModel):
@@ -65,8 +69,10 @@ class BacktestRequest(BaseModel):
             raise ValueError("end_date must be after start_date")
         return self
 
-    def cache_key(self) -> str:
-        return hashlib.sha256(json.dumps(self.model_dump(mode="json"), sort_keys=True).encode()).hexdigest()
+    def cache_key(self, data_through: date) -> str:
+        """Same settings on the same price data give the same key; a new day of prices gives a new one."""
+        payload = {**self.model_dump(mode="json"), "data_through": data_through.isoformat()}
+        return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
 
 
 class TradeOut(BaseModel):
@@ -122,27 +128,22 @@ class MonkeyOut(BaseModel):
 class StoredRun:
     request: BacktestRequest
     result: BacktestResult
-    prices: pd.Series
-
-
-# In-memory stores, replaced by Supabase later.
-_results: dict[str, StoredRun] = {}
-_by_settings: dict[str, str] = {}
 
 
 def reset_store() -> None:
-    _results.clear()
-    _by_settings.clear()
+    store.clear_backtests()
 
 
 def get_run(result_id: str) -> StoredRun:
-    if result_id not in _results:
+    saved = store.load_backtest(result_id)
+    if saved is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Backtest not found")
-    return _results[result_id]
+    request, result = saved
+    return StoredRun(BacktestRequest.model_validate(request), result)
 
 
-def _summary(result_id: str, cached: bool = False) -> BacktestSummary:
-    run = _results[result_id]
+def _summary(result_id: str, run: StoredRun | None = None, cached: bool = False) -> BacktestSummary:
+    run = run or get_run(result_id)
     request, result = run.request, run.result
     return BacktestSummary(
         id=result_id,
@@ -155,30 +156,34 @@ def _summary(result_id: str, cached: bool = False) -> BacktestSummary:
 
 def execute_backtest(request: BacktestRequest, load: PriceLoader) -> BacktestSummary:
     """Run (or reuse) a backtest. Shared by the HTTP route and the rule-builder agent."""
-    key = request.cache_key()
-    if key in _by_settings:
-        return _summary(_by_settings[key], cached=True)
-
     try:
         strategy = STRATEGIES[request.strategy](**request.params)
     except (TypeError, ValueError) as exc:
         raise HTTPException(UNPROCESSABLE, f"params: {exc}") from exc
 
-    try:
-        prices = load(request.ticker, request.start_date, request.end_date)
-    except FileNotFoundError as exc:
-        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Price data is not available yet") from exc
+    prices = load_prices(load, request.ticker, request.start_date, request.end_date)
     if len(prices) < MIN_TRADING_DAYS:
         raise HTTPException(
             UNPROCESSABLE,
             f"start_date: need at least {MIN_TRADING_DAYS} trading days of data, found {len(prices)}",
         )
 
+    key = request.cache_key(data_through=prices.index[-1].date())
+    existing = store.find_backtest_id(key)
+    if existing:
+        return _summary(existing, cached=True)
+
     result = Backtester(fee=request.fee).run(strategy, prices, request.amount, ticker=request.ticker)
     result_id = uuid.uuid4().hex
-    _results[result_id] = StoredRun(request, result, prices)
-    _by_settings[key] = result_id
-    return _summary(result_id)
+    try:
+        store.save_backtest(result_id, key, request.model_dump(mode="json"), result)
+    except IntegrityError:
+        # The same run was saved a moment earlier by another request; reuse it.
+        existing = store.find_backtest_id(key)
+        if existing is None:
+            raise
+        return _summary(existing, cached=True)
+    return _summary(result_id, StoredRun(request, result))
 
 
 def buy_and_hold_metrics(result_id: str) -> MetricsOut:
@@ -187,11 +192,14 @@ def buy_and_hold_metrics(result_id: str) -> MetricsOut:
     return MetricsOut(**vars(compute_metrics(result.benchmark_curve, trade_count=1)))
 
 
-def monkey_comparison(result_id: str, n_monkeys: int = DEFAULT_MONKEYS) -> MonkeyOut:
+def monkey_comparison(result_id: str, load: PriceLoader, n_monkeys: int = DEFAULT_MONKEYS) -> MonkeyOut:
     run = get_run(result_id)
     metrics = run.result.metrics
+    # The same days the run used: its start date through the last day on its equity curve.
+    last_day = run.result.equity_curve.index[-1].date()
+    prices = load_prices(load, run.request.ticker, run.request.start_date, last_day)
     comparison = compare_to_monkeys(
-        run.prices,
+        prices,
         strategy_ending_value=metrics.ending_value,
         trade_count=metrics.trade_count,
         start_cash=run.request.amount,
@@ -207,8 +215,12 @@ def run_backtest(request: BacktestRequest, load: PriceLoader = Depends(get_price
 
 
 @router.get("/{result_id}/monkeys", response_model=MonkeyOut)
-def get_monkeys(result_id: str, n: int = Query(DEFAULT_MONKEYS, ge=10, le=5000)) -> MonkeyOut:
-    return monkey_comparison(result_id, n)
+def get_monkeys(
+    result_id: str,
+    n: int = Query(DEFAULT_MONKEYS, ge=10, le=5000),
+    load: PriceLoader = Depends(get_price_loader),
+) -> MonkeyOut:
+    return monkey_comparison(result_id, load, n)
 
 
 @router.get("/{result_id}", response_model=BacktestDetail)
@@ -221,7 +233,7 @@ def get_backtest(result_id: str) -> BacktestDetail:
     ]
     trades: list[dict[str, Any]] = [vars(t) for t in result.trades]
     return BacktestDetail(
-        **_summary(result_id).model_dump(),
+        **_summary(result_id, run).model_dump(),
         request=request,
         equity_curve=curve,
         trades=[TradeOut(**t) for t in trades],
