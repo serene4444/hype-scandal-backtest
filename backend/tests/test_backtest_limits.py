@@ -1,5 +1,7 @@
 """Protections for the public backtest endpoint: per-visitor limit, storage cap, database outages."""
 
+from datetime import timedelta
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.exc import OperationalError
@@ -75,3 +77,25 @@ def test_database_outage_gives_a_clear_503(error):
     assert response.status_code == 503
     assert "database" in response.json()["detail"]
     assert response.headers["Retry-After"] == "60"
+
+
+def test_failed_run_does_not_use_up_the_limit(client, monkeypatch):
+    monkeypatch.setenv("BACKTESTS_PER_HOUR", "1")
+    real_run = backtests.Backtester.run
+    crash = {"on": True}
+
+    def flaky_run(self, *args, **kwargs):
+        if crash["on"]:
+            raise RuntimeError("backtester crashed")
+        return real_run(self, *args, **kwargs)
+
+    monkeypatch.setattr(backtests.Backtester, "run", flaky_run)
+    assert post(TestClient(app, raise_server_exceptions=False), body(0.05)).status_code == 500
+    crash["on"] = False
+    assert post(client, body(0.05)).status_code == 201  # the crashed attempt was not counted
+
+
+def test_zero_limit_blocks_every_new_run(client, monkeypatch):
+    monkeypatch.setenv("BACKTESTS_PER_HOUR", "0")
+    assert post(client, body(0.05)).status_code == 429
+    assert store.events_since("backtest", store.utc_now() - timedelta(hours=1))[0] == 0

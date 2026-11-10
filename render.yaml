@@ -21,7 +21,13 @@ services:
         sync: false
       - key: CLIENT_IP_HEADER
         value: x-forwarded-for
+      - key: CLIENT_IP_PROXY_HOPS # raise only if visitors all share one limit (more than one proxy appends to the header)
+        value: "1"
       - key: AGENT_RULES_PER_HOUR
         value: "5"
       - key: AGENT_RULES_PER_DAY
         value: "100"
+      - key: BACKTESTS_PER_HOUR # new backtests saved per visitor per hour; reopening a saved run is free
+        value: "30"
+      - key: MAX_SAVED_BACKTESTS # storage cap; the oldest runs are deleted beyond this
+        value: "5000"

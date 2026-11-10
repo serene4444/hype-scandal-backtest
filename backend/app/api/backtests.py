@@ -158,12 +158,15 @@ def _summary(result_id: str, run: StoredRun | None = None, cached: bool = False)
 
 
 def execute_backtest(
-    request: BacktestRequest, load: PriceLoader, before_new_run: Callable[[], None] | None = None
+    request: BacktestRequest,
+    load: PriceLoader,
+    before_new_run: Callable[[], Callable[[], None] | None] | None = None,
 ) -> BacktestSummary:
     """Run (or reuse) a backtest. Shared by the HTTP route and the rule-builder agent.
 
     ``before_new_run`` is called only when a new run is about to be saved (not for a reused
-    one), so the route can apply its rate limit there.
+    one), so the route can apply its rate limit there. It may return an undo function, called
+    if the run then fails or another request saved the same run first.
     """
     try:
         strategy = STRATEGIES[request.strategy](**request.params)
@@ -182,18 +185,23 @@ def execute_backtest(
     if existing:
         return _summary(existing, cached=True)
 
-    if before_new_run is not None:
-        before_new_run()
-    result = Backtester(fee=request.fee).run(strategy, prices, request.amount, ticker=request.ticker)
+    undo = before_new_run() if before_new_run is not None else None
     result_id = uuid.uuid4().hex
     try:
+        result = Backtester(fee=request.fee).run(strategy, prices, request.amount, ticker=request.ticker)
         store.save_backtest(result_id, key, request.model_dump(mode="json"), result)
     except IntegrityError:
-        # The same run was saved a moment earlier by another request; reuse it.
+        # The same run was saved a moment earlier by another request; reuse it, free of charge.
+        if undo:
+            undo()
         existing = store.find_backtest_id(key)
         if existing is None:
             raise
         return _summary(existing, cached=True)
+    except Exception:
+        if undo:
+            undo()
+        raise
     store.prune_backtests(keep=env_int("MAX_SAVED_BACKTESTS", DEFAULT_MAX_SAVED_BACKTESTS))
     return _summary(result_id, StoredRun(request, result))
 

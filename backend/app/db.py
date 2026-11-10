@@ -8,6 +8,7 @@ on first use.
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 
@@ -23,8 +24,12 @@ from sqlalchemy import (
     String,
     Table,
     create_engine,
+    text,
 )
+from sqlalchemy.exc import InternalError, ProgrammingError
 from sqlalchemy.pool import StaticPool
+
+logger = logging.getLogger(__name__)
 
 LOCAL_DB_PATH = Path(__file__).resolve().parents[1] / "data" / "app.db"
 
@@ -125,8 +130,25 @@ def lock_down_tables(engine: Engine) -> None:
 
     Supabase serves tables in the public schema through its own web API. With RLS on and no
     policies, that API can read and write nothing, while this backend (which owns the tables)
-    keeps full access. Safe to run repeatedly.
+    keeps full access. Tables that already have it are skipped, so a normal start takes no
+    table locks. If this role may not change it (only a table's owner can), the app still
+    starts and logs a warning, since the tables themselves work either way.
     """
-    with engine.begin() as conn:
-        for table in metadata.sorted_tables:
-            conn.exec_driver_sql(f'ALTER TABLE public."{table.name}" ENABLE ROW LEVEL SECURITY')
+    names = [table.name for table in metadata.sorted_tables]
+    try:
+        with engine.begin() as conn:
+            open_tables = conn.execute(
+                text(
+                    "SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
+                    "WHERE n.nspname = 'public' AND c.relname = ANY(:names) AND NOT c.relrowsecurity"
+                ),
+                {"names": names},
+            ).scalars().all()
+            for name in open_tables:
+                conn.exec_driver_sql(f'ALTER TABLE public."{name}" ENABLE ROW LEVEL SECURITY')
+    except (ProgrammingError, InternalError) as exc:
+        logger.warning(
+            "Could not turn on Row Level Security (%s). Enable it for these tables in the Supabase dashboard: %s",
+            exc.orig,
+            ", ".join(names),
+        )

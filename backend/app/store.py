@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 import pandas as pd
@@ -125,10 +125,24 @@ def utc_now() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
-def record_event(kind: str, client: str, when: datetime) -> None:
+EVENT_RETENTION = timedelta(days=2)
+"""The limits look back at most one day, so older events are deleted to keep these tables small."""
+
+
+def record_event(kind: str, client: str, when: datetime) -> int:
+    """Count one event and return its id (so it can be undone); also drops events too old to matter."""
     table = EVENT_TABLES[kind]
     with get_engine().begin() as conn:
-        conn.execute(insert(table).values(client=client, created_at=when))
+        conn.execute(delete(table).where(table.c.created_at < when - EVENT_RETENTION))
+        event_id = conn.execute(insert(table).values(client=client, created_at=when)).inserted_primary_key[0]
+    return int(event_id)
+
+
+def delete_event(kind: str, event_id: int) -> None:
+    """Undo a counted event, e.g. a request that was turned away or a run that failed."""
+    table = EVENT_TABLES[kind]
+    with get_engine().begin() as conn:
+        conn.execute(delete(table).where(table.c.id == event_id))
 
 
 def events_since(kind: str, since: datetime, client: str | None = None) -> tuple[int, datetime | None]:
@@ -142,8 +156,8 @@ def events_since(kind: str, since: datetime, client: str | None = None) -> tuple
     return int(count), oldest
 
 
-def record_agent_call(client: str, when: datetime) -> None:
-    record_event("agent", client, when)
+def record_agent_call(client: str, when: datetime) -> int:
+    return record_event("agent", client, when)
 
 
 def agent_calls_since(since: datetime, client: str | None = None) -> tuple[int, datetime | None]:

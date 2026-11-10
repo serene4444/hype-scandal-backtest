@@ -80,3 +80,30 @@ def test_raw_ip_is_never_stored(client):
     with get_engine().connect() as conn:
         stored = conn.execute(select(agent_calls.c.client)).scalar()
     assert "1.1.1.1" not in stored and len(stored) == 32
+
+
+def test_rejected_calls_are_not_counted(client):
+    for _ in range(4):
+        post(client, "1.1.1.1")
+    assert store.agent_calls_since(datetime(2000, 1, 1))[0] == 2
+
+
+def test_events_older_than_two_days_are_deleted():
+    store.record_agent_call("someone", store.utc_now() - timedelta(days=3))
+    store.record_agent_call("someone", store.utc_now())
+    assert store.agent_calls_since(datetime(2000, 1, 1))[0] == 1
+
+
+def test_proxy_hops_picks_the_right_address(monkeypatch):
+    from app.api.rate_limit import client_key
+
+    class FakeRequest:
+        headers = {"x-forwarded-for": "6.6.6.6, 1.1.1.1, 10.0.0.1"}
+        client = None
+
+    class Direct(FakeRequest):
+        headers = {"x-forwarded-for": "1.1.1.1"}
+
+    monkeypatch.setenv("CLIENT_IP_HEADER", "x-forwarded-for")
+    monkeypatch.setenv("CLIENT_IP_PROXY_HOPS", "2")
+    assert client_key(FakeRequest()) == client_key(Direct())
