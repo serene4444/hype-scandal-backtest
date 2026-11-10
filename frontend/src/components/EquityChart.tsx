@@ -218,10 +218,13 @@ export function EquityChart({ curve, trades, events, amount, showBuyAndHold }: P
             {geometry.trades.map(({ trade, i }) => {
               const cx = x(i)
               const cy = y(curve[i].strategy)
+              // Shrink markers when trades are packed tightly (narrow screens, many trades) so the line stays readable.
+              const s = Math.min(5, Math.max(2.5, ((right - LEFT) / Math.max(trades.length, 1)) * 0.6))
+              const gap = s
               const points =
                 trade.action === 'BUY'
-                  ? `${cx},${cy + 5} ${cx + 5},${cy + 14} ${cx - 5},${cy + 14}`
-                  : `${cx - 5},${cy - 14} ${cx + 5},${cy - 14} ${cx},${cy - 5}`
+                  ? `${cx},${cy + gap} ${cx + s},${cy + gap + 1.8 * s} ${cx - s},${cy + gap + 1.8 * s}`
+                  : `${cx - s},${cy - gap - 1.8 * s} ${cx + s},${cy - gap - 1.8 * s} ${cx},${cy - gap}`
               return <polygon key={`${trade.date}-${trade.action}`} points={points} fill={MARK} />
             })}
 
