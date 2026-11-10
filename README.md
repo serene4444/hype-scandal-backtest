@@ -134,6 +134,24 @@ hype-scandal-backtest/
 └── .github/    # CI workflows and the daily data job
 ```
 
+## Run locally
+
+```bash
+# Backend (http://localhost:8000)
+cd backend
+python -m venv .venv && .venv/Scripts/activate   # macOS/Linux: source .venv/bin/activate
+pip install -e ".[dev]"
+cp .env.example .env                             # then add your ANTHROPIC_API_KEY
+uvicorn app.main:app --reload
+
+# Frontend (http://localhost:5173), in a second terminal
+cd frontend
+npm install
+npm run dev
+```
+
+In development the frontend sends `/api/*` requests to the backend on port 8000. In production, set `VITE_API_URL` to the deployed API's address. Backtests need price CSVs in `backend/data/prices/` (see the README there).
+
 ## Results
 
 Results will be published here after v1 launches, including:
